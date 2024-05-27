@@ -4,6 +4,8 @@ const express = require('express');  // Creates a web application framework
 const { open } = require('sqlite');  // Asynchronous function to open a SQLite database connection
 const sqlite3 = require('sqlite3') // Imports the SQLite3 database driver with verbose logging
 const bcrypt = require('bcrypt');  // For password hashing (ensure proper salting)
+const jwt = require('jsonwebtoken'); // Used to create access tokens for an application 
+const { error } = require('console');
 
 // Initialize the Express application.
 const app = express();
@@ -75,30 +77,40 @@ app.post('/register/', async (req,res) => {
 
 
 //2) Login API.
-app.post('/login/', async (req,res) => {
-    const {username, password} = req.body;
-    const existingUserQuery = `SELECT username, password FROM user WHERE username = '${username}';`;
-    try{
-        const existingUser = await db.get(existingUserQuery);
-        
-        if(existingUser){
-            const isPasswordMatched = await bcrypt.compare(password, existingUser.password);
-            if(isPasswordMatched){
-                res.status(200);
-                return res.send('Login success!');
-            }
-            else{
-                res.status(400);
-                return res.send('Invalid password');
-            }
+app.post('/login/', async (req, res) => {
+    const { username, password } = req.body;
+    // Check for JWT token in Authorization header (optional step)
+    const authHeader = req.headers['authorization'];
+    if (authHeader) {
+        try {
+            const jwtToken = authHeader.split(' ')[1];
+            const decodedPayload = jwt.verify(jwtToken, 'your_secret_key'); // Use a strong, unique secret key
+            console.log(`User ${decodedPayload.username} logged in using JWT token.`);
+            return res.status(200).json({ message: 'Login successful (JWT)', user: decodedPayload.username });
+        } catch (error) {
+            console.error('Error verifying JWT token:', error);
+            return res.status(401).json({ message: 'Invalid JWT Token' });
         }
-        else{
-            res.status(400);
-            return res.send('Invalid user');
+    }
+    // Username and password login (if no JWT token provided)
+    try {
+        const existingUserQuery = `SELECT username, password FROM user WHERE username = ?`;
+        const existingUser = await db.get(existingUserQuery, [username]);
+        if (!existingUser) {
+            return res.status(400).json({ message: 'Invalid username' });
         }
-    }catch(error){
-        console.error('Error in login:', error);
-        res.status(500).json({ status: 'Server error' });
+        const isPasswordMatched = await bcrypt.compare(password, existingUser.password);
+        if (!isPasswordMatched) {
+        return res.status(400).json({ message: 'Invalid password' });
+        }
+      // Generate a new JWT token (consider using a refresh token mechanism for longer-term sessions)
+        const payload = { username: existingUser.username };
+        const jwtToken = jwt.sign(payload, 'your_secret_key', { expiresIn: '5m' }); // Set appropriate expiration time
+        console.log(`User ${existingUser.username} logged in successfully.`);
+        res.status(200).json({ message: 'Login successful', jwtToken });
+    } catch (error) {
+        console.error('Error during login:', error);
+        res.status(500).json({ message: 'Server error' }); // Consider more specific error messages
     }
 });
 
